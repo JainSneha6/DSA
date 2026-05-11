@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react'
+import io from 'socket.io-client'
+
+const socket = io('http://localhost:5000')
 
 export default function App() {
   const [notes, setNotes] = useState([])
@@ -9,11 +12,31 @@ export default function App() {
   const [editText, setEditText] = useState('')
 
   const dsaTags = ['Array', 'String', 'LinkedList', 'Stack', 'Queue', 'Tree', 'Graph', 'DP', 'Heap', 'Greedy', 'Binary Search', 'Sliding Window', 'Bit Manipulation']
-
   const [selectedTag, setSelectedTag] = useState('')
 
   useEffect(() => {
     fetchNotes()
+
+    // Real-time listeners
+    socket.on('note-added', (newNote) => {
+      setNotes(prev => [newNote, ...prev])
+    })
+
+    socket.on('note-updated', (updatedNote) => {
+      setNotes(prev => prev.map(note => 
+        note.id === updatedNote.id ? updatedNote : note
+      ))
+    })
+
+    socket.on('note-deleted', (id) => {
+      setNotes(prev => prev.filter(note => note.id !== id))
+    })
+
+    return () => {
+      socket.off('note-added')
+      socket.off('note-updated')
+      socket.off('note-deleted')
+    }
   }, [])
 
   const fetchNotes = async () => {
@@ -37,17 +60,15 @@ export default function App() {
       timestamp: new Date().toISOString(),
     }
 
-    setNotes([newNote, ...notes])
-    setTitle('')
-    setText('')
-    setSelectedTag('')
-
     try {
       await fetch('http://localhost:5000/notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newNote),
       })
+      setTitle('')
+      setText('')
+      setSelectedTag('')
     } catch (err) {
       console.error(err)
     }
@@ -75,14 +96,9 @@ export default function App() {
         body: JSON.stringify(updatedNote),
       })
     } catch (err) {
-      console.error('Failed to save edit:', err)
+      console.error(err)
     }
 
-    const updatedNotes = notes.map(note =>
-      note.id === editingId ? { ...note, ...updatedNote } : note
-    )
-
-    setNotes(updatedNotes)
     setEditingId(null)
     setEditTitle('')
     setEditText('')
@@ -95,7 +111,6 @@ export default function App() {
   }
 
   const deleteNote = async (id) => {
-    setNotes(notes.filter(n => n.id !== id))
     try {
       await fetch(`http://localhost:5000/notes/${id}`, { method: 'DELETE' })
     } catch (err) {
@@ -112,7 +127,6 @@ export default function App() {
       <div className="max-w-5xl mx-auto">
         <div className="bg-[#121a2e] border border-[#1e2a4d] rounded-3xl shadow-2xl overflow-hidden relative">
 
-          {/* Spiral Binding */}
           <div className="absolute left-0 top-0 bottom-0 w-16 bg-[#0a0f1c] flex flex-col items-center pt-8 gap-6 z-20 border-r border-[#1e2a4d]">
             {Array.from({ length: 26 }).map((_, i) => (
               <div key={i} className="w-9 h-9 border-4 border-[#334155] rounded-full" />
@@ -120,10 +134,14 @@ export default function App() {
           </div>
 
           <div className="pl-20 pr-12 py-12">
-            <h1 className="text-5xl font-bold text-white mb-2">DSA Notebook</h1>
-            <p className="text-slate-400 mb-10">Save your solutions with clear headings</p>
+            <div className="flex justify-between items-center mb-10">
+              <div>
+                <h1 className="text-5xl font-bold text-white">DSA Notebook</h1>
+                <p className="text-emerald-400">● Live • Multiple users connected</p>
+              </div>
+            </div>
 
-            {/* New Note */}
+            {/* New Note Form */}
             <div className="mb-12 bg-[#1a2540] border border-slate-700 rounded-2xl p-8">
               <input
                 type="text"
@@ -136,7 +154,7 @@ export default function App() {
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="Write your approach, code explanation, time & space complexity..."
+                placeholder="Write your approach, code, complexity analysis..."
                 rows={8}
                 className="w-full bg-transparent text-slate-200 text-[17px] leading-relaxed outline-none resize-y"
               />
@@ -165,8 +183,7 @@ export default function App() {
               {notes.length === 0 && (
                 <div className="text-center py-24 text-slate-400">
                   <div className="text-7xl mb-6">📓</div>
-                  <p className="text-2xl">Your DSA Notebook is empty</p>
-                  <p className="mt-3">Start adding your first problem above</p>
+                  <p className="text-2xl">Notebook is empty</p>
                 </div>
               )}
 

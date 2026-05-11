@@ -1,15 +1,20 @@
 import express from 'express'
 import cors from 'cors'
 import fs from 'fs/promises'
-import path from 'path'
+import { createServer } from 'http'
+import { Server } from 'socket.io'
 
 const app = express()
+const httpServer = createServer(app)
+const io = new Server(httpServer, {
+  cors: { origin: "*" }
+})
+
 const PORT = 5000
+const NOTES_FILE = './notes.json'
 
 app.use(cors())
 app.use(express.json())
-
-const NOTES_FILE = './notes.json'
 
 // Initialize file
 const initializeNotesFile = async () => {
@@ -20,30 +25,24 @@ const initializeNotesFile = async () => {
   }
 }
 
-// GET ALL NOTES
+// Get all notes
 app.get('/notes', async (req, res) => {
   try {
     const data = await fs.readFile(NOTES_FILE, 'utf8')
-    const notes = JSON.parse(data)
-    res.json(notes)
-  } catch (error) {
+    res.json(JSON.parse(data))
+  } catch {
     res.json([])
   }
 })
 
-// ADD NEW NOTE
+// Add Note
 app.post('/notes', async (req, res) => {
   try {
     const { title, text, tag } = req.body
-
-    if (!text?.trim()) {
-      return res.status(400).json({ success: false, error: 'Text is required' })
-    }
-
     const newNote = {
       id: Date.now().toString(),
-      title: title?.trim() || 'Untitled Note',
-      text: text.trim(),
+      title: title?.trim() || 'Untitled DSA Note',
+      text: text?.trim(),
       tag: tag || 'General',
       timestamp: new Date().toISOString(),
     }
@@ -55,17 +54,16 @@ app.post('/notes', async (req, res) => {
     } catch {}
 
     notes.unshift(newNote)
-
     await fs.writeFile(NOTES_FILE, JSON.stringify(notes, null, 2))
 
+    io.emit('note-added', newNote)        // Real-time broadcast
     res.status(201).json({ success: true, note: newNote })
   } catch (error) {
-    console.error(error)
-    res.status(500).json({ success: false, error: 'Failed to add note' })
+    res.status(500).json({ success: false })
   }
 })
 
-// UPDATE NOTE
+// Update Note
 app.put('/notes/:id', async (req, res) => {
   try {
     const { id } = req.params
@@ -77,10 +75,8 @@ app.put('/notes/:id', async (req, res) => {
       notes = JSON.parse(data)
     } catch {}
 
-    const index = notes.findIndex(note => note.id === id)
-    if (index === -1) {
-      return res.status(404).json({ success: false, error: 'Note not found' })
-    }
+    const index = notes.findIndex(n => n.id === id)
+    if (index === -1) return res.status(404).json({ success: false })
 
     notes[index] = {
       ...notes[index],
@@ -92,36 +88,35 @@ app.put('/notes/:id', async (req, res) => {
 
     await fs.writeFile(NOTES_FILE, JSON.stringify(notes, null, 2))
 
+    io.emit('note-updated', notes[index])   // Real-time
     res.json({ success: true, note: notes[index] })
   } catch (error) {
-    console.error(error)
-    res.status(500).json({ success: false, error: 'Failed to update note' })
+    res.status(500).json({ success: false })
   }
 })
 
-// DELETE NOTE
+// Delete Note
 app.delete('/notes/:id', async (req, res) => {
   try {
     const { id } = req.params
-
     let notes = []
     try {
       const data = await fs.readFile(NOTES_FILE, 'utf8')
       notes = JSON.parse(data)
     } catch {}
 
-    const filteredNotes = notes.filter(note => note.id !== id)
+    notes = notes.filter(n => n.id !== id)
+    await fs.writeFile(NOTES_FILE, JSON.stringify(notes, null, 2))
 
-    await fs.writeFile(NOTES_FILE, JSON.stringify(filteredNotes, null, 2))
-
+    io.emit('note-deleted', id)   // Real-time
     res.json({ success: true })
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to delete note' })
+    res.status(500).json({ success: false })
   }
 })
 
 initializeNotesFile().then(() => {
-  app.listen(PORT, () => {
-    console.log(`✅ DSA Notebook Server running on http://localhost:${PORT}`)
+  httpServer.listen(PORT, () => {
+    console.log(`🚀 Real-time DSA Notebook running on http://localhost:${PORT}`)
   })
 })
