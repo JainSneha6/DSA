@@ -10,7 +10,7 @@ const io = new Server(httpServer, {
   cors: { origin: "*" }
 })
 
-const PORT = 5000
+const PORT = process.env.PORT || 5000
 const NOTES_FILE = './notes.json'
 
 app.use(cors())
@@ -51,7 +51,7 @@ app.post('/notes', async (req, res) => {
     try {
       const data = await fs.readFile(NOTES_FILE, 'utf8')
       notes = JSON.parse(data)
-    } catch {}
+    } catch { }
 
     notes.unshift(newNote)
     await fs.writeFile(NOTES_FILE, JSON.stringify(notes, null, 2))
@@ -73,7 +73,7 @@ app.put('/notes/:id', async (req, res) => {
     try {
       const data = await fs.readFile(NOTES_FILE, 'utf8')
       notes = JSON.parse(data)
-    } catch {}
+    } catch { }
 
     const index = notes.findIndex(n => n.id === id)
     if (index === -1) return res.status(404).json({ success: false })
@@ -103,7 +103,7 @@ app.delete('/notes/:id', async (req, res) => {
     try {
       const data = await fs.readFile(NOTES_FILE, 'utf8')
       notes = JSON.parse(data)
-    } catch {}
+    } catch { }
 
     notes = notes.filter(n => n.id !== id)
     await fs.writeFile(NOTES_FILE, JSON.stringify(notes, null, 2))
