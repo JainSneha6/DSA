@@ -1,122 +1,133 @@
 import express from 'express'
 import cors from 'cors'
-import fs from 'fs/promises'
+import mongoose from 'mongoose'
+import dotenv from 'dotenv'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
 
+dotenv.config()
+
 const app = express()
 const httpServer = createServer(app)
+
 const io = new Server(httpServer, {
-  cors: { origin: "*" }
+  cors: { origin: '*' }
 })
 
 const PORT = process.env.PORT || 5000
-const NOTES_FILE = './notes.json'
 
 app.use(cors())
 app.use(express.json())
 
-// Initialize file
-const initializeNotesFile = async () => {
-  try {
-    await fs.access(NOTES_FILE)
-  } catch {
-    await fs.writeFile(NOTES_FILE, JSON.stringify([], null, 2))
-  }
-}
+// MongoDB Atlas connection
+await mongoose.connect(process.env.MONGODB_URI)
+console.log('Connected to MongoDB Atlas')
+
+const noteSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+      default: 'Untitled DSA Note',
+    },
+    text: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    tag: {
+      type: String,
+      trim: true,
+      default: 'General',
+    },
+  },
+  { timestamps: true }
+)
+
+const Note = mongoose.model('Note', noteSchema)
+
+const formatNote = (note) => ({
+  id: note._id.toString(),
+  title: note.title,
+  text: note.text,
+  tag: note.tag,
+  timestamp: note.updatedAt || note.createdAt,
+})
 
 // Get all notes
 app.get('/notes', async (req, res) => {
   try {
-    const data = await fs.readFile(NOTES_FILE, 'utf8')
-    res.json(JSON.parse(data))
-  } catch {
-    res.json([])
+    const notes = await Note.find().sort({ createdAt: -1 })
+    res.json(notes.map(formatNote))
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to fetch notes' })
   }
 })
 
-// Add Note
+// Add note
 app.post('/notes', async (req, res) => {
   try {
     const { title, text, tag } = req.body
-    const newNote = {
-      id: Date.now().toString(),
+
+    const newNote = await Note.create({
       title: title?.trim() || 'Untitled DSA Note',
-      text: text?.trim(),
-      tag: tag || 'General',
-      timestamp: new Date().toISOString(),
-    }
+      text: text?.trim() || '',
+      tag: tag?.trim() || 'General',
+    })
 
-    let notes = []
-    try {
-      const data = await fs.readFile(NOTES_FILE, 'utf8')
-      notes = JSON.parse(data)
-    } catch { }
+    const formatted = formatNote(newNote)
+    io.emit('note-added', formatted)
 
-    notes.unshift(newNote)
-    await fs.writeFile(NOTES_FILE, JSON.stringify(notes, null, 2))
-
-    io.emit('note-added', newNote)        // Real-time broadcast
-    res.status(201).json({ success: true, note: newNote })
+    res.status(201).json({ success: true, note: formatted })
   } catch (error) {
-    res.status(500).json({ success: false })
+    res.status(500).json({ success: false, message: 'Failed to create note' })
   }
 })
 
-// Update Note
+// Update note
 app.put('/notes/:id', async (req, res) => {
   try {
     const { id } = req.params
     const { title, text, tag } = req.body
 
-    let notes = []
-    try {
-      const data = await fs.readFile(NOTES_FILE, 'utf8')
-      notes = JSON.parse(data)
-    } catch { }
-
-    const index = notes.findIndex(n => n.id === id)
-    if (index === -1) return res.status(404).json({ success: false })
-
-    notes[index] = {
-      ...notes[index],
-      title: title?.trim() || notes[index].title,
-      text: text?.trim() || notes[index].text,
-      tag: tag || notes[index].tag,
-      timestamp: new Date().toISOString(),
+    const existing = await Note.findById(id)
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Note not found' })
     }
 
-    await fs.writeFile(NOTES_FILE, JSON.stringify(notes, null, 2))
+    existing.title = title !== undefined ? title.trim() || existing.title : existing.title
+    existing.text = text !== undefined ? text.trim() || existing.text : existing.text
+    existing.tag = tag !== undefined ? tag.trim() || existing.tag : existing.tag
 
-    io.emit('note-updated', notes[index])   // Real-time
-    res.json({ success: true, note: notes[index] })
+    await existing.save()
+
+    const formatted = formatNote(existing)
+    io.emit('note-updated', formatted)
+
+    res.json({ success: true, note: formatted })
   } catch (error) {
-    res.status(500).json({ success: false })
+    res.status(500).json({ success: false, message: 'Failed to update note' })
   }
 })
 
-// Delete Note
+// Delete note
 app.delete('/notes/:id', async (req, res) => {
   try {
     const { id } = req.params
-    let notes = []
-    try {
-      const data = await fs.readFile(NOTES_FILE, 'utf8')
-      notes = JSON.parse(data)
-    } catch { }
 
-    notes = notes.filter(n => n.id !== id)
-    await fs.writeFile(NOTES_FILE, JSON.stringify(notes, null, 2))
+    const deleted = await Note.findByIdAndDelete(id)
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: 'Note not found' })
+    }
 
-    io.emit('note-deleted', id)   // Real-time
+    io.emit('note-deleted', id)
     res.json({ success: true })
   } catch (error) {
-    res.status(500).json({ success: false })
+    res.status(500).json({ success: false, message: 'Failed to delete note' })
   }
 })
 
-initializeNotesFile().then(() => {
-  httpServer.listen(PORT, () => {
-    console.log(`🚀 Real-time DSA Notebook running on http://localhost:${PORT}`)
-  })
+httpServer.listen(PORT, () => {
+  console.log(`🚀 Backend running on http://localhost:${PORT}`)
 })
